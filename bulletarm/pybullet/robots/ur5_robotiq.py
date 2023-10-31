@@ -4,7 +4,7 @@ import math
 import numpy as np
 import numpy.random as npr
 from collections import deque, namedtuple
-from attrdict import AttrDict
+from attrdictionary import AttrDict
 from threading import Thread
 
 import pybullet as pb
