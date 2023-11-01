@@ -12,11 +12,9 @@ import torch
 
 import numpy as np
 import matplotlib
-
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import AxesGrid
-
 sys.path.append('./')
 sys.path.append('..')
 from bulletarm_baselines.fc_dqn.scripts.create_agent import createAgent
@@ -30,9 +28,8 @@ from bulletarm_baselines.fc_dqn.utils.parameters import *
 from bulletarm_baselines.fc_dqn.utils.torch_utils import augmentBuffer, augmentBufferD4
 from bulletarm_baselines.fc_dqn.scripts.fill_buffer_deconstruct import fillDeconstructUsingRunner
 
-ExpertTransition = collections.namedtuple('ExpertTransition',
-                                          'state obs action reward next_state next_obs done step_left expert')
 
+ExpertTransition = collections.namedtuple('ExpertTransition', 'state obs action reward next_state next_obs done step_left expert')
 
 def set_seed(s):
     np.random.seed(s)
@@ -41,13 +38,11 @@ def set_seed(s):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-
 def getCurrentObs(in_hand, obs):
     obss = []
     for i, o in enumerate(obs):
         obss.append((o.squeeze(), in_hand[i].squeeze()))
     return obss
-
 
 def train_step(agent, replay_buffer, logger):
     batch = replay_buffer.sample(batch_size)
@@ -56,7 +51,6 @@ def train_step(agent, replay_buffer, logger):
     if logger.num_training_steps % target_update_freq == 0:
         agent.updateTarget()
 
-
 def saveModelAndInfo(logger, agent):
     logger.writeLog()
     logger.exportData()
@@ -64,39 +58,38 @@ def saveModelAndInfo(logger, agent):
 
 
 def evaluate(envs, agent, logger):
-    states, in_hands, obs = envs.reset()
-    evaled = 0
-    temp_reward = [[] for _ in range(num_eval_processes)]
+  states, in_hands, obs = envs.reset()
+  evaled = 0
+  temp_reward = [[] for _ in range(num_eval_processes)]
+  if not no_bar:
+    eval_bar = tqdm(total=num_eval_episodes)
+  while evaled < num_eval_episodes:
+    q_value_maps, actions_star_idx, actions_star = agent.getEGreedyActions(states, in_hands, obs, 0)
+    actions_star = torch.cat((actions_star, states.unsqueeze(1)), dim=1)
+    states_, in_hands_, obs_, rewards, dones = envs.step(actions_star, auto_reset=True)
+    rewards = rewards.numpy()
+    dones = dones.numpy()
+    states = copy.copy(states_)
+    in_hands = copy.copy(in_hands_)
+    obs = copy.copy(obs_)
+    for i, r in enumerate(rewards.reshape(-1)):
+      temp_reward[i].append(r)
+    evaled += int(np.sum(dones))
+    for i, d in enumerate(dones.astype(bool)):
+      if d:
+        R = 0
+        for r in reversed(temp_reward[i]):
+          R = r + gamma * R
+        logger.logEvalEpisode(temp_reward[i], discounted_return=R)
+        # eval_rewards.append(R)
+        temp_reward[i] = []
     if not no_bar:
-        eval_bar = tqdm(total=num_eval_episodes)
-    while evaled < num_eval_episodes:
-        q_value_maps, actions_star_idx, actions_star = agent.getEGreedyActions(states, in_hands, obs, 0)
-        actions_star = torch.cat((actions_star, states.unsqueeze(1)), dim=1)
-        states_, in_hands_, obs_, rewards, dones = envs.step(actions_star, auto_reset=True)
-        rewards = rewards.numpy()
-        dones = dones.numpy()
-        states = copy.copy(states_)
-        in_hands = copy.copy(in_hands_)
-        obs = copy.copy(obs_)
-        for i, r in enumerate(rewards.reshape(-1)):
-            temp_reward[i].append(r)
-        evaled += int(np.sum(dones))
-        for i, d in enumerate(dones.astype(bool)):
-            if d:
-                R = 0
-                for r in reversed(temp_reward[i]):
-                    R = r + gamma * R
-                logger.logEvalEpisode(temp_reward[i], discounted_return=R)
-                # eval_rewards.append(R)
-                temp_reward[i] = []
-        if not no_bar:
-            eval_bar.update(evaled - eval_bar.n)
-    # logger.eval_rewards.append(np.mean(eval_rewards[:num_eval_episodes]))
-    logger.logEvalInterval()
-    logger.writeLog()
-    if not no_bar:
-        eval_bar.close()
-
+      eval_bar.update(evaled - eval_bar.n)
+  # logger.eval_rewards.append(np.mean(eval_rewards[:num_eval_episodes]))
+  logger.logEvalInterval()
+  logger.writeLog()
+  if not no_bar:
+    eval_bar.close()
 
 def train():
     eval_thread = None
@@ -132,8 +125,7 @@ def train():
 
     hyper_parameters['model_shape'] = agent.getModelStr()
     # logger = Logger(log_dir, checkpoint_interval=save_freq, hyperparameters=hyper_parameters)
-    logger = BaselineLogger(log_dir, checkpoint_interval=save_freq, num_eval_eps=num_eval_episodes,
-                            hyperparameters=hyper_parameters, eval_freq=eval_freq)
+    logger = BaselineLogger(log_dir, checkpoint_interval=save_freq, num_eval_eps=num_eval_episodes, hyperparameters=hyper_parameters, eval_freq=eval_freq)
     logger.saveParameters(hyper_parameters)
 
     if buffer_type == 'expert':
@@ -145,8 +137,7 @@ def train():
     states, in_hands, obs = envs.reset()
 
     if load_sub:
-        logger.loadCheckPoint(os.path.join(base_dir, load_sub, 'checkpoint'), agent.loadFromState,
-                              replay_buffer.loadFromState)
+        logger.loadCheckPoint(os.path.join(base_dir, load_sub, 'checkpoint'), agent.loadFromState, replay_buffer.loadFromState)
 
     if planner_episode > 0 and not load_sub:
         if fill_buffer_deconstruct:
@@ -168,27 +159,25 @@ def train():
                 buffer_obs = getCurrentObs(in_hands, obs)
                 buffer_obs_ = getCurrentObs(in_hands_, obs_)
                 for i in range(planner_num_process):
-                    transition = ExpertTransition(states[i], buffer_obs[i], planner_actions_star_idx[i], rewards[i],
-                                                  states_[i],
-                                                  buffer_obs_[i], dones[i], torch.tensor(100), torch.tensor(1))
-                    local_transitions[i].append(transition)
+                  transition = ExpertTransition(states[i], buffer_obs[i], planner_actions_star_idx[i], rewards[i], states_[i],
+                                                buffer_obs_[i], dones[i], torch.tensor(100), torch.tensor(1))
+                  local_transitions[i].append(transition)
                 states = copy.copy(states_)
                 obs = copy.copy(obs_)
                 in_hands = copy.copy(in_hands_)
 
                 for i in range(planner_num_process):
-                    if dones[i] and rewards[i]:
-                        for t in local_transitions[i]:
-                            replay_buffer.add(t)
-                        local_transitions[i] = []
-                        j += 1
-                        s += 1
-                        if not no_bar:
-                            planner_bar.set_description(
-                                '{:.3f}/{}, AVG: {:.3f}'.format(s, j, float(s) / j if j != 0 else 0))
-                            planner_bar.update(1)
-                    elif dones[i]:
-                        local_transitions[i] = []
+                  if dones[i] and rewards[i]:
+                    for t in local_transitions[i]:
+                      replay_buffer.add(t)
+                    local_transitions[i] = []
+                    j += 1
+                    s += 1
+                    if not no_bar:
+                      planner_bar.set_description('{:.3f}/{}, AVG: {:.3f}'.format(s, j, float(s) / j if j != 0 else 0))
+                      planner_bar.update(1)
+                  elif dones[i]:
+                    local_transitions[i] = []
 
         if expert_aug_n > 0:
             augmentBuffer(replay_buffer, expert_aug_n, agent.rzs)
@@ -202,9 +191,8 @@ def train():
             t0 = time.time()
             train_step(agent, replay_buffer, logger)
             if not no_bar:
-                pbar.set_description(
-                    'loss: {:.3f}, time: {:.2f}'.format(float(logger.getCurrentLoss()), time.time() - t0))
-                pbar.update(len(logger.num_training_steps) - pbar.n)
+                pbar.set_description('loss: {:.3f}, time: {:.2f}'.format(float(logger.getCurrentLoss()), time.time()-t0))
+                pbar.update(len(logger.num_training_steps)-pbar.n)
 
             if (time.time() - start_time) / 3600 > time_limit:
                 logger.saveCheckPoint(agent.getSaveState(), replay_buffer.getSaveState())
@@ -257,16 +245,15 @@ def train():
         obs = copy.copy(obs_)
         in_hands = copy.copy(in_hands_)
 
-        if (time.time() - start_time) / 3600 > time_limit:
+        if (time.time() - start_time)/3600 > time_limit:
             break
 
         if not no_bar:
             timer_final = time.time()
             description = 'Action Step:{}; Episode: {}; Reward:{:.03f}; Eval Reward:{:.03f}; Explore:{:.02f}; Loss:{:.03f}; Time:{:.03f}'.format(
-                logger.num_steps, logger.num_eps, logger.getAvg(logger.training_eps_rewards, 100),
-                np.mean(logger.eval_eps_rewards[-2]) if len(logger.eval_eps_rewards) > 1 and len(
-                    logger.eval_eps_rewards[-2]) > 0 else 0, eps, float(logger.getCurrentLoss()),
-                timer_final - timer_start)
+              logger.num_steps, logger.num_eps, logger.getAvg(logger.training_eps_rewards, 100),
+              np.mean(logger.eval_eps_rewards[-2]) if len(logger.eval_eps_rewards) > 1 and len(logger.eval_eps_rewards[-2]) > 0 else 0, eps, float(logger.getCurrentLoss()),
+              timer_final - timer_start)
             pbar.set_description(description)
             timer_start = timer_final
             pbar.update(logger.num_training_steps - pbar.n)
@@ -288,7 +275,6 @@ def train():
     logger.saveCheckPoint(agent.getSaveState(), replay_buffer.getSaveState())
     envs.close()
     eval_envs.close()
-
 
 if __name__ == '__main__':
     train()
